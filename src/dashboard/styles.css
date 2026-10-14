@@ -55,11 +55,66 @@ h1 { font-size: var(--vui-font-size-lg); overflow: hidden; text-overflow: ellips
 .status.paused { background: var(--vui-color-warning-surface); color: var(--vui-color-warning); }
 .status.idle { background: var(--vui-color-surface-sunken); color: var(--vui-color-text-muted); }
 
-.actions, .detail-actions, .views, .chips, .dialog-actions {
+.actions, .detail-actions, .views, .chips, .chip-list, .chip-actions, .dialog-actions {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
   align-items: center;
+}
+
+.chips { align-items: center; }
+.chip-list { flex: 1 1 auto; min-width: 0; }
+.chip-actions { flex: 0 0 auto; margin-left: auto; }
+
+.text-button {
+  appearance: none;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: max-content;
+  max-width: none;
+  height: var(--vui-size-control);
+  padding: 0 12px;
+  border-radius: var(--vui-radius);
+  border: var(--vui-border-width, 1px) solid var(--vui-color-border);
+  background: var(--vui-color-surface);
+  color: var(--vui-color-text);
+  font: inherit;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.text-button.on {
+  background: var(--vui-color-primary);
+  color: var(--vui-color-on-primary);
+  border-color: transparent;
+}
+.text-button:hover:not(:disabled) { background: var(--vui-color-surface-hover); }
+.text-button.on:hover:not(:disabled) { background: var(--vui-color-primary-hover); }
+.text-button:disabled { opacity: 0.5; cursor: default; }
+
+.actions vui-button,
+.detail-actions vui-button,
+.views vui-button,
+.selection-bar vui-button,
+.dialog-actions vui-button {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: none;
+}
+
+.actions vui-button::part(base),
+.detail-actions vui-button::part(base),
+.views vui-button::part(base),
+.selection-bar vui-button::part(base),
+.dialog-actions vui-button::part(base) {
+  width: auto !important;
+  min-width: max-content !important;
+  max-width: none !important;
+  white-space: nowrap !important;
 }
 
 .summary { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; }
@@ -76,13 +131,25 @@ vui-button.counter::part(base) {
 .counter span { color: var(--vui-color-text-muted); }
 
 .toolbar {
-  display: grid;
-  grid-template-columns: auto minmax(180px, 1fr) auto auto auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
   gap: 8px;
-  align-items: end;
 }
-.views vui-button { flex: 0 0 auto; }
-.filter-note { color: var(--vui-color-warning); }
+.toolbar .views { flex: 1 0 auto; }
+.toolbar vui-input {
+  flex: 1 1 12rem;
+  width: min(28rem, 100%) !important;
+  min-width: 0;
+  max-width: 28rem;
+}
+.toolbar vui-select {
+  flex: 0 1 12rem;
+  width: 12rem;
+  min-width: 9rem;
+  max-width: 16rem;
+}
+.filter-note { flex: 1 0 100%; color: var(--vui-color-warning); }
 
 .workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
 .workspace.with-detail { grid-template-columns: minmax(0, 1fr) 360px; }
@@ -169,7 +236,7 @@ vui-button.counter::part(base) {
 
 @media (max-width: 1100px) {
   .summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .topbar, .toolbar { grid-template-columns: 1fr; }
+  .topbar { grid-template-columns: 1fr; }
   .workspace.with-detail { grid-template-columns: 1fr; }
   .detail { border-left: 0; border-top: var(--vui-border-width) solid var(--vui-color-border); max-height: 280px; }
 }

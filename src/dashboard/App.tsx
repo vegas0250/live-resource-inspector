@@ -321,18 +321,22 @@ export function App() {
       </div>
 
       <div className="chips">
-        {CATEGORY_ORDER.map((category) => (
-          <vui-button
-            key={category}
-            size="small"
-            variant={categories.includes(category) ? 'primary' : 'secondary'}
-            onClick={() => setCategories((current) => current.includes(category) ? current.filter((item) => item !== category) : [...current, category])}
-          >
-            {CATEGORY_LABELS[category]}
-          </vui-button>
-        ))}
-        {states.includes('error') ? <vui-button size="small" variant="primary">Только ошибки</vui-button> : null}
-        <vui-button size="small" variant="ghost" onClick={resetFilters} disabled={!filterActive}>Сбросить фильтр</vui-button>
+        <div className="chip-list">
+          {CATEGORY_ORDER.map((category) => (
+            <button
+              key={category}
+              type="button"
+              className={categories.includes(category) ? 'text-button on' : 'text-button'}
+              onClick={() => setCategories((current) => current.includes(category) ? current.filter((item) => item !== category) : [...current, category])}
+            >
+              {CATEGORY_LABELS[category]}
+            </button>
+          ))}
+        </div>
+        <div className="chip-actions">
+          {states.includes('error') ? <span className="text-button on">Только ошибки</span> : null}
+          <button type="button" className="text-button" onClick={resetFilters} disabled={!filterActive}>Сбросить фильтр</button>
+        </div>
         {view === 'requests' && states.includes('error') && rows.length < (stats?.errors ?? 0) ? (
           <span className="filter-note">В журнале {rows.length.toLocaleString('ru-RU')} из {(stats?.errors ?? 0).toLocaleString('ru-RU')}: старые строки удаляются по лимиту, счётчик сохраняется.</span>
         ) : null}
