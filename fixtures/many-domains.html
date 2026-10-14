@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru">
+  <head><meta charset="utf-8" /><title>Много доменов</title></head>
+  <body>
+    <h1>Внешние домены</h1>
+    <div id="list"></div>
+    <script>
+      const hosts = ['example.com', 'example.org', 'example.net', 'iana.org', 'w3.org'];
+      const list = document.getElementById('list');
+      for (let index = 0; index < 40; index += 1) {
+        const host = hosts[index % hosts.length];
+        const link = document.createElement('a');
+        link.href = `https://${host}/resource/${index}.png`;
+        link.textContent = host;
+        const image = document.createElement('img');
+        image.alt = '';
+        image.src = `https://cdn${index}.example/pixel.png`;
+        list.append(link, image);
+      }
+    </script>
+  </body>
+</html>

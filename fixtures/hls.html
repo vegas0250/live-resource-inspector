@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ru">
+  <head><meta charset="utf-8" /><title>HLS</title></head>
+  <body>
+    <h1>HLS</h1>
+    <video controls src="media/sample.m3u8"></video>
+    <p><a href="https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8">Внешний тестовый M3U8</a></p>
+    <button id="load" type="button">Запросить внешний плейлист</button>
+    <script>
+      document.getElementById('load').addEventListener('click', () => {
+        fetch('https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8').catch(() => {});
+      });
+    </script>
+  </body>
+</html>

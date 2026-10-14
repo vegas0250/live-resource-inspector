@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="ru">
+  <head><meta charset="utf-8" /><title>Blob</title></head>
+  <body>
+    <h1>Blob URL</h1>
+    <video id="player" controls></video>
+    <p>Исходный адрес: <a id="origin" href="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4">flower.mp4</a></p>
+    <script>
+      const source = document.getElementById('origin').href;
+      const player = document.getElementById('player');
+      fetch(source).then((response) => response.blob()).then((blob) => {
+        player.src = URL.createObjectURL(blob);
+      }).catch(() => {
+        player.src = URL.createObjectURL(new Blob([new Uint8Array([0])], { type: 'video/mp4' }));
+      });
+    </script>
+  </body>
+</html>

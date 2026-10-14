@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ru">
+  <head><meta charset="utf-8" /><title>Прокрутка</title>
+    <style>#spacer { height: 140vh; } #more img { width: 120px; height: 80px; background: #ccc; }</style>
+  </head>
+  <body>
+    <h1>Ресурсы после прокрутки</h1>
+    <div id="spacer"></div>
+    <div id="more"></div>
+    <script>
+      const target = document.getElementById('more');
+      const observer = new IntersectionObserver((entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        for (let index = 0; index < 12; index += 1) {
+          const image = document.createElement('img');
+          image.src = `images/scrolled-${index}.png`;
+          image.alt = '';
+          target.append(image);
+        }
+        observer.disconnect();
+      });
+      observer.observe(target);
+    </script>
+  </body>
+</html>

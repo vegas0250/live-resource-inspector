@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru">
+  <head><meta charset="utf-8" /><title>SPA</title></head>
+  <body>
+    <h1>Одностраничное приложение</h1>
+    <button id="next" type="button">Открыть раздел</button>
+    <div id="view"></div>
+    <script>
+      document.getElementById('next').addEventListener('click', () => {
+        const view = document.getElementById('view');
+        const link = document.createElement('a');
+        link.href = 'video-mp4.html';
+        link.textContent = 'Видео из SPA';
+        const image = document.createElement('img');
+        image.src = 'images/from-spa.png';
+        image.alt = '';
+        view.append(link, image);
+        history.pushState({}, '', '/section/video');
+      });
+    </script>
+  </body>
+</html>

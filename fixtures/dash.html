@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ru">
+  <head><meta charset="utf-8" /><title>DASH</title></head>
+  <body>
+    <h1>DASH</h1>
+    <p><a href="media/sample.mpd">Локальный манифест</a></p>
+    <p><a href="https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd">Внешний MPD</a></p>
+    <button id="load" type="button">Запросить манифест</button>
+    <script>
+      document.getElementById('load').addEventListener('click', () => {
+        fetch('https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd').catch(() => {});
+      });
+    </script>
+  </body>
+</html>

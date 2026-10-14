@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ru">
+  <head><meta charset="utf-8" /><title>WebSocket</title></head>
+  <body>
+    <h1>WebSocket</h1>
+    <button id="connect" type="button">Установить соединение</button>
+    <pre id="log"></pre>
+    <script>
+      document.getElementById('connect').addEventListener('click', () => {
+        const log = document.getElementById('log');
+        const socket = new WebSocket('wss://echo.websocket.events');
+        socket.addEventListener('open', () => { log.textContent = 'соединение открыто'; });
+        socket.addEventListener('error', () => { log.textContent = 'ошибка рукопожатия — адрес всё равно может появиться в запросах'; });
+      });
+    </script>
+  </body>
+</html>
