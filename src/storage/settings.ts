@@ -1,12 +1,19 @@
 import { DEFAULT_LIMITS } from '../shared/constants';
-import type { Settings } from '../shared/types';
+import type { AppTheme, Settings } from '../shared/types';
+
+const THEMES = new Set<AppTheme>(['system', 'light', 'dark', 'high-contrast', 'neon-green', 'neon-magenta', 'neon-cyan']);
 
 export const defaultSettings: Settings = {
   scope: 'document',
   excludedDomains: [],
   maxResources: DEFAULT_LIMITS.maxResources,
   maxRequests: DEFAULT_LIMITS.maxRequests,
+  theme: 'system',
 };
+
+export function isAppTheme(value: string): value is AppTheme {
+  return THEMES.has(value as AppTheme);
+}
 
 function clamp(value: unknown, min: number, max: number, fallback: number): number {
   const number = typeof value === 'number' ? value : Number(value);
@@ -24,6 +31,7 @@ export function normalizeSettings(value: unknown): Settings {
     excludedDomains: [...new Set(excluded)],
     maxResources: clamp(raw.maxResources, 1000, 200_000, defaultSettings.maxResources),
     maxRequests: clamp(raw.maxRequests, 100, 100_000, defaultSettings.maxRequests),
+    theme: typeof raw.theme === 'string' && isAppTheme(raw.theme) ? raw.theme : 'system',
   };
 }
 

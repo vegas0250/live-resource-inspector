@@ -1,18 +1,15 @@
-import { HOST_ORIGINS } from '../shared/constants';
 import type { TabStateResponse } from '../shared/messages';
 import type { Settings } from '../shared/types';
 import { saveSettings } from '../storage/settings';
-
-export function requestHostAccess(): Promise<boolean> {
-  return chrome.permissions.request({ origins: [...HOST_ORIGINS] });
-}
+import { dashboardQuery } from './focus';
+import type { DashboardLink } from './focus';
 
 export function send<T>(message: unknown): Promise<T> {
   return chrome.runtime.sendMessage(message) as Promise<T>;
 }
 
-export async function openDashboard(tabId: number): Promise<void> {
-  await chrome.tabs.create({ url: chrome.runtime.getURL(`pages/dashboard.html?tabId=${tabId}`) });
+export async function openDashboard(tabId: number, link?: Pick<DashboardLink, 'view' | 'category' | 'state'>): Promise<void> {
+  await chrome.tabs.create({ url: chrome.runtime.getURL(`pages/dashboard.html?${dashboardQuery(tabId, link)}`) });
 }
 
 export async function readActiveTab(): Promise<chrome.tabs.Tab | null> {

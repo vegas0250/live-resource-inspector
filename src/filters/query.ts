@@ -2,6 +2,7 @@ import type {
   Category,
   DomainAggregate,
   RequestRecord,
+  RequestState,
   ResourceRecord,
   SortDirection,
   SortKey,
@@ -13,6 +14,7 @@ export interface FilterState {
   excludedDomains: string[];
   sort: SortKey;
   direction: SortDirection;
+  states?: RequestState[];
 }
 
 export function queryTokens(text: string): string[] {
@@ -73,6 +75,7 @@ export function filterRequests(records: RequestRecord[], filter: FilterState): R
   const tokens = queryTokens(filter.text);
   const matched = records.filter((record) => {
     if (domainExcluded(record.domain, filter.excludedDomains)) return false;
+    if (filter.states && filter.states.length > 0 && !filter.states.includes(record.state)) return false;
     if (!requestMatchesCategory(record, filter.categories)) return false;
     return matchesText(record.searchText, tokens);
   });

@@ -1,20 +1,40 @@
 :root {
-  color-scheme: dark;
-  font-family: "Segoe UI", system-ui, sans-serif;
-  color: #e7eef3;
-  background: #101418;
+  font-family: var(--vui-font-sans);
+  font-size: var(--vui-font-size);
+  background: var(--vui-color-background);
+  color: var(--vui-color-text);
 }
 
-body { margin: 0; width: 360px; }
+body { margin: 0; width: 440px; background: var(--vui-color-background); color: var(--vui-color-text); }
 
-main { padding: 14px; display: grid; gap: 8px; }
-.eyebrow { margin: 0; color: #2fbfb0; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
-h1 { margin: 0; font-size: 18px; }
-.url, .message { margin: 0; color: #93a1ab; overflow-wrap: anywhere; font-size: 12px; }
-.status { margin: 0; color: #e2b15a; }
-.status.running { color: #8fce6a; }
-ul { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
-.actions { display: flex; gap: 8px; }
-button { font: inherit; color: inherit; background: #21282f; border: 1px solid #313a42; border-radius: 6px; padding: 7px 10px; cursor: pointer; }
-button.primary { background: #2fbfb0; color: #062421; border-color: transparent; font-weight: 650; }
-button:disabled { opacity: 0.45; }
+main { padding: 12px; display: grid; gap: 8px; }
+.heading {
+  display: grid;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+.heading:disabled { cursor: default; }
+.eyebrow { margin: 0; color: var(--vui-color-primary); font-size: var(--vui-font-size-sm); letter-spacing: 0.04em; text-transform: uppercase; }
+h1 { margin: 0; font-size: var(--vui-font-size-lg); }
+.url, .message { margin: 0; color: var(--vui-color-text-muted); overflow-wrap: anywhere; font-size: var(--vui-font-size-sm); }
+.status { margin: 0; color: var(--vui-color-warning); }
+.status.running { color: var(--vui-color-success); }
+
+.summary { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.summary vui-button.counter { width: 100%; }
+vui-button.counter::part(base) {
+  width: 100%;
+  min-height: 52px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+}
+.counter strong { display: block; font-size: var(--vui-font-size-lg); font-variant-numeric: tabular-nums; }
+.counter span { color: var(--vui-color-text-muted); }
+.actions { display: flex; gap: 8px; align-items: end; }

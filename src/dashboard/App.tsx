@@ -14,10 +14,13 @@ import { SIGNIFICANT_CLEAR_COUNT } from '../shared/constants';
 import { CATEGORY_LABELS, SOURCE_LABELS, STATE_LABELS, VIEW_LABELS, formatTime, typeLabel } from '../shared/labels';
 import type { DashboardEvent } from '../shared/messages';
 import { CATEGORY_ORDER } from '../shared/types';
-import type { Category, DomainAggregate, RequestRecord, ResourceRecord, SessionMeta, Settings, SortDirection, SortKey, ViewId } from '../shared/types';
+import type { Category, DomainAggregate, RequestRecord, RequestState, ResourceRecord, SessionMeta, Settings, SortDirection, SortKey, ViewId } from '../shared/types';
 import { isSafeToOpen } from '../shared/url';
-import { defaultSettings, loadSettings } from '../storage/settings';
-import { control, listSessions, requestHostAccess, startMonitoring, tabState, updateScope, updateSettings } from './api';
+import { defaultSettings, loadSettings, normalizeSettings } from '../storage/settings';
+import { applyAppearance, controlValue } from '../ui/appearance';
+import { ThemeSelect } from '../ui/ThemeSelect';
+import { control, listSessions, startMonitoring, tabState, updateScope, updateSettings } from './api';
+import { readDashboardFocus } from './focus';
 import { DataTable } from './Table';
 import type { TableColumn } from './Table';
 import { copyText, deliver } from './deliver';
@@ -30,10 +33,12 @@ const model = new LiveModel();
 export function App() {
   const revision = useSyncExternalStore(model.subscribe, model.getRevision, model.getRevision);
   const tabId = useMemo(() => Number(new URLSearchParams(location.search).get('tabId')) || 0, []);
-  const [view, setView] = useState<ViewId>('resources');
+  const [focus] = useState(() => readDashboardFocus(location.search));
+  const [view, setView] = useState<ViewId>(focus.view);
   const [text, setText] = useState('');
   const [appliedText, setAppliedText] = useState('');
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [categories, setCategories] = useState<Category[]>(focus.categories);
+  const [states, setStates] = useState<RequestState[]>(focus.states);
   const [sort, setSort] = useState<SortKey>('time');
   const [direction, setDirection] = useState<SortDirection>('desc');
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -45,7 +50,7 @@ export function App() {
   const [exportOpen, setExportOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const anchor = useRef(0);
-  const searchRef = useRef<HTMLInputElement>(null);
+  const searchRef = useRef<HTMLElement>(null);
 
   const filter = useMemo<FilterState>(
     () => ({
@@ -54,9 +59,11 @@ export function App() {
       excludedDomains: settings.excludedDomains,
       sort,
       direction,
+      states,
     }),
-    [appliedText, categories, settings.excludedDomains, sort, direction],
+    [appliedText, categories, settings.excludedDomains, sort, direction, states],
   );
+  const filterActive = text.trim() !== '' || categories.length > 0 || states.length > 0;
   const rows = model.query(view, filter);
   void revision;
 
@@ -66,12 +73,23 @@ export function App() {
   }, [text]);
 
   useEffect(() => {
-    void loadSettings().then(setSettings);
+    void loadSettings().then((next) => {
+      setSettings(next);
+      applyAppearance(next.theme);
+    });
+    const onStorage = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
+      if (area !== 'local' || !changes.settings) return;
+      const next = normalizeSettings(changes.settings.newValue);
+      setSettings(next);
+      applyAppearance(next.theme);
+    };
+    chrome.storage.onChanged.addListener(onStorage);
     void refreshSessions();
-    if (!tabId) return;
+    if (!tabId) return () => chrome.storage.onChanged.removeListener(onStorage);
     void tabState(tabId).then((response) => {
       if (response.session) void model.open(response.session.id);
     });
+    return () => chrome.storage.onChanged.removeListener(onStorage);
   }, [tabId]);
 
   useEffect(() => {
@@ -117,7 +135,7 @@ export function App() {
       const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.tagName === 'SELECT';
       if (event.key === '/' && !typing) {
         event.preventDefault();
-        searchRef.current?.focus();
+        searchRef.current?.shadowRoot?.querySelector('input')?.focus();
       }
       if (event.key === 'Escape') {
         setActiveId(null);
@@ -150,11 +168,6 @@ export function App() {
 
   async function onStart() {
     if (!tabId) return;
-    const granted = await requestHostAccess();
-    if (!granted) {
-      notify('Без доступа к сайтам видны только данные уже открытой страницы расширения.');
-      return;
-    }
     const response = session?.status === 'paused' ? await control('RESUME', tabId) : await startMonitoring(tabId);
     if (!response.ok || !response.session) {
       notify(response.error ?? 'Не удалось запустить мониторинг');
@@ -236,91 +249,93 @@ export function App() {
           {session?.status === 'running' ? 'Мониторинг идёт' : session?.status === 'paused' ? 'Пауза' : 'Мониторинг не запущен'}
         </p>
         <div className="actions">
+          <ThemeSelect value={settings.theme} onChange={(theme) => void onTheme(theme)} />
           {session?.status === 'running' ? (
-            <button type="button" onClick={() => void onPause()}>Пауза</button>
+            <vui-button variant="secondary" onClick={() => void onPause()}>Пауза</vui-button>
           ) : (
-            <button type="button" className="primary" onClick={() => void onStart()} disabled={!tabId}>Начать</button>
+            <vui-button variant="primary" onClick={() => void onStart()} disabled={!tabId}>Начать</vui-button>
           )}
-          <button type="button" onClick={() => void onClear()} disabled={!session}>Очистить</button>
-          <button type="button" onClick={() => setExportOpen(true)}>Экспорт</button>
-          <button type="button" onClick={() => setSettingsOpen(true)}>Настройки</button>
+          <vui-button variant="secondary" onClick={() => void onClear()} disabled={!session}>Очистить</vui-button>
+          <vui-button variant="secondary" onClick={() => setExportOpen(true)}>Экспорт</vui-button>
+          <vui-button variant="secondary" onClick={() => setSettingsOpen(true)}>Настройки</vui-button>
         </div>
       </header>
 
       <section className="summary">
-        <Counter label="Запросы" value={stats?.requests ?? 0} onClick={() => setView('requests')} />
-        <Counter label="Уникальные URL" value={stats?.uniqueUrls ?? 0} onClick={() => setView('resources')} />
-        <Counter label="Домены" value={stats?.domains ?? 0} onClick={() => setView('domains')} />
-        <Counter label="Ссылки DOM" value={stats?.domLinks ?? 0} onClick={() => setView('links')} />
+        <Counter label="Запросы" value={stats?.requests ?? 0} onClick={() => { setView('requests'); setStates([]); }} />
+        <Counter label="Уникальные URL" value={stats?.uniqueUrls ?? 0} onClick={() => { setView('resources'); setStates([]); }} />
+        <Counter label="Домены" value={stats?.domains ?? 0} onClick={() => { setView('domains'); setStates([]); }} />
+        <Counter label="Ссылки DOM" value={stats?.domLinks ?? 0} onClick={() => { setView('links'); setStates([]); }} />
         <Counter label="Видео" value={stats?.video ?? 0} onClick={() => focusCategory('video', 'media')} />
         <Counter label="Аудио" value={stats?.audio ?? 0} onClick={() => focusCategory('audio', 'media')} />
         <Counter label="Игровые кандидаты" value={stats?.gameCandidates ?? 0} onClick={() => focusCategory('game', 'media')} />
-        <Counter label="Ошибки" value={stats?.errors ?? 0} onClick={() => { setView('requests'); setText('ошибка'); }} />
+        <Counter label="Ошибки" value={stats?.errors ?? 0} onClick={showErrors} />
       </section>
 
-      {session?.warning ? <p className="banner">{session.warning}</p> : null}
-      {model.error ? <p className="banner danger">{model.error}</p> : null}
+      {session?.warning ? <vui-alert variant="warning" banner>{session.warning}</vui-alert> : null}
+      {model.error ? <vui-alert variant="danger" banner>{model.error}</vui-alert> : null}
 
       <div className="toolbar">
         <div className="views">
           {(Object.keys(VIEW_LABELS) as ViewId[]).map((item) => (
-            <button key={item} type="button" className={view === item ? 'active' : ''} onClick={() => setView(item)}>
+            <vui-button key={item} size="small" variant={view === item ? 'primary' : 'ghost'} onClick={() => setView(item)}>
               {VIEW_LABELS[item]}
-            </button>
+            </vui-button>
           ))}
         </div>
-        <input
+        <vui-input
           ref={searchRef}
+          label="Поиск"
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onInput={(event) => setText(controlValue(event))}
           placeholder="Домен, URL, файл, MIME, категория, статус, источник"
-          aria-label="Поиск"
         />
-        <label>
-          Сортировка
-          <select value={`${sort}:${direction}`} onChange={(event) => {
-            const [nextSort, nextDirection] = event.target.value.split(':') as [SortKey, SortDirection];
-            setSort(nextSort);
-            setDirection(nextDirection);
-          }}>
-            <option value="time:desc">Время, новые</option>
-            <option value="time:asc">Время, старые</option>
-            <option value="domain:asc">Домен А–Я</option>
-            <option value="domain:desc">Домен Я–А</option>
-            <option value="category:asc">Категория</option>
-            <option value="count:desc">Количество</option>
-          </select>
-        </label>
-        <label>
-          Сессия
-          <select
-            value={session?.id ?? ''}
-            onChange={(event) => {
-              const next = sessions.find((item) => item.id === event.target.value);
-              if (next) void model.open(next.id);
-            }}
-          >
-            <option value="">Текущая</option>
-            {sessions.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.domain} · {item.status === 'running' && !item.archived ? 'активна' : 'архив'} · {formatTime(item.startedAt)}
-              </option>
-            ))}
-          </select>
-        </label>
+        <vui-select label="Сортировка" size="small" value={`${sort}:${direction}`} onChange={(event) => {
+          const [nextSort, nextDirection] = controlValue(event).split(':') as [SortKey, SortDirection];
+          setSort(nextSort);
+          setDirection(nextDirection);
+        }}>
+          <vui-option value="time:desc">Время, новые</vui-option>
+          <vui-option value="time:asc">Время, старые</vui-option>
+          <vui-option value="domain:asc">Домен А–Я</vui-option>
+          <vui-option value="domain:desc">Домен Я–А</vui-option>
+          <vui-option value="category:asc">Категория</vui-option>
+          <vui-option value="count:desc">Количество</vui-option>
+        </vui-select>
+        <vui-select
+          label="Сессия"
+          size="small"
+          value={session?.id ?? ''}
+          onChange={(event) => {
+            const next = sessions.find((item) => item.id === controlValue(event));
+            if (next) void model.open(next.id);
+          }}
+        >
+          <vui-option value="">Текущая</vui-option>
+          {sessions.map((item) => (
+            <vui-option key={item.id} value={item.id}>
+              {item.domain} · {item.status === 'running' && !item.archived ? 'активна' : 'архив'} · {formatTime(item.startedAt)}
+            </vui-option>
+          ))}
+        </vui-select>
       </div>
 
       <div className="chips">
         {CATEGORY_ORDER.map((category) => (
-          <button
+          <vui-button
             key={category}
-            type="button"
-            className={categories.includes(category) ? 'chip on' : 'chip'}
+            size="small"
+            variant={categories.includes(category) ? 'primary' : 'secondary'}
             onClick={() => setCategories((current) => current.includes(category) ? current.filter((item) => item !== category) : [...current, category])}
           >
             {CATEGORY_LABELS[category]}
-          </button>
+          </vui-button>
         ))}
+        {states.includes('error') ? <vui-button size="small" variant="primary">Только ошибки</vui-button> : null}
+        <vui-button size="small" variant="ghost" onClick={resetFilters} disabled={!filterActive}>Сбросить фильтр</vui-button>
+        {view === 'requests' && states.includes('error') && rows.length < (stats?.errors ?? 0) ? (
+          <span className="filter-note">В журнале {rows.length.toLocaleString('ru-RU')} из {(stats?.errors ?? 0).toLocaleString('ru-RU')}: старые строки удаляются по лимиту, счётчик сохраняется.</span>
+        ) : null}
       </div>
 
       <div className={active ? 'workspace with-detail' : 'workspace'}>
@@ -342,27 +357,24 @@ export function App() {
 
       <footer className="selection-bar">
         <span>{selectedRows.length > 0 ? `Выбрано: ${selectedRows.length}` : `В фильтре: ${rows.length}`}</span>
-        <button type="button" onClick={() => setSelected(new Set(rows.map((row) => row.id)))}>Выделить фильтр</button>
-        <button type="button" onClick={() => void copyUrls(selectedRows)} disabled={selectedRows.length === 0}>Копировать URL</button>
-        <button type="button" onClick={() => void copyDomains(selectedRows.map(rowDomain))} disabled={selectedRows.length === 0}>Копировать домены</button>
-        <button type="button" onClick={() => void copyRows(selectedRows)}>Копировать строки</button>
-        <button type="button" onClick={() => void copyUrls(rows)}>URL фильтра</button>
-        <button type="button" onClick={() => void copyUrls(model.allResources().map((resource) => ({ kind: 'resource', id: resource.id, resource })))}>Все уникальные URL</button>
-        <button type="button" onClick={() => void copyDomains(model.allDomains().map((item) => item.domain))}>Все домены</button>
+        <vui-button size="small" variant="secondary" onClick={() => setSelected(new Set(rows.map((row) => row.id)))}>Выделить фильтр</vui-button>
+        <vui-button size="small" variant="secondary" onClick={() => void copyUrls(selectedRows)} disabled={selectedRows.length === 0}>Копировать URL</vui-button>
+        <vui-button size="small" variant="secondary" onClick={() => void copyDomains(selectedRows.map(rowDomain))} disabled={selectedRows.length === 0}>Копировать домены</vui-button>
+        <vui-button size="small" variant="secondary" onClick={() => void copyRows(selectedRows)}>Копировать строки</vui-button>
+        <vui-button size="small" variant="secondary" onClick={() => void copyUrls(rows)}>URL фильтра</vui-button>
+        <vui-button size="small" variant="secondary" onClick={() => void copyUrls(model.allResources().map((resource) => ({ kind: 'resource', id: resource.id, resource })))}>Все уникальные URL</vui-button>
+        <vui-button size="small" variant="secondary" onClick={() => void copyDomains(model.allDomains().map((item) => item.domain))}>Все домены</vui-button>
       </footer>
 
       {toast ? <div className="toast">{toast}</div> : null}
       {confirmClear ? (
-        <dialog open className="modal">
-          <form method="dialog">
-            <h2>Очистить сессию?</h2>
-            <p>Будут удалены {stats?.uniqueUrls ?? 0} уникальных URL и журнал из {stats?.requests ?? 0} запросов. Это действие только для текущей сессии.</p>
-            <div className="actions">
-              <button type="button" onClick={() => setConfirmClear(false)}>Отмена</button>
-              <button type="button" className="danger" onClick={() => void doClear()}>Очистить</button>
-            </div>
-          </form>
-        </dialog>
+        <vui-dialog open label="Очистить сессию?" onClose={() => setConfirmClear(false)}>
+          <p>Будут удалены {stats?.uniqueUrls ?? 0} уникальных URL и журнал из {stats?.requests ?? 0} запросов. Это действие только для текущей сессии.</p>
+          <div slot="footer" className="dialog-actions">
+            <vui-button variant="secondary" onClick={() => setConfirmClear(false)}>Отмена</vui-button>
+            <vui-button variant="danger" onClick={() => void doClear()}>Очистить</vui-button>
+          </div>
+        </vui-dialog>
       ) : null}
       {exportOpen ? (
         <ExportDialog
@@ -380,9 +392,31 @@ export function App() {
     </div>
   );
 
+  function resetFilters() {
+    setText('');
+    setAppliedText('');
+    setCategories([]);
+    setStates([]);
+  }
+
+  function showErrors() {
+    setView('requests');
+    setText('');
+    setAppliedText('');
+    setCategories([]);
+    setStates(['error']);
+  }
+
+  async function onTheme(theme: Settings['theme']) {
+    const saved = await updateSettings({ ...settings, theme });
+    setSettings(saved);
+    applyAppearance(saved.theme);
+  }
+
   function focusCategory(category: Category, nextView: ViewId) {
     setView(nextView);
     setCategories([category]);
+    setStates([]);
   }
 
   async function excludeDomain(domain: string) {
@@ -448,10 +482,10 @@ export function App() {
 
 function Counter({ label, value, onClick }: { label: string; value: number; onClick: () => void }) {
   return (
-    <button type="button" className="counter" onClick={onClick}>
+    <vui-button variant="secondary" className="counter" onClick={onClick}>
       <strong>{value.toLocaleString('ru-RU')}</strong>
       <span>{label}</span>
-    </button>
+    </vui-button>
   );
 }
 
@@ -520,18 +554,18 @@ function Detail({ row, onClose, onFindDomain, onExclude }: {
     <aside className="detail">
       <div className="detail-head">
         <h2>Подробности</h2>
-        <button type="button" onClick={onClose}>Закрыть</button>
+        <vui-button size="small" variant="ghost" onClick={onClose}>Закрыть</vui-button>
       </div>
       {row.kind === 'resource' ? <ResourceFacts record={row.resource} /> : null}
       {row.kind === 'request' ? <RequestFacts record={row.request} /> : null}
       {row.kind === 'domain' ? <DomainFacts record={row.domain} /> : null}
       <div className="detail-actions">
-        {url && isSafeToOpen(url) ? <button type="button" onClick={() => void chrome.tabs.create({ url })}>Открыть URL</button> : null}
-        {url ? <button type="button" onClick={() => void copyText(url, 'url.txt')}>Копировать URL</button> : null}
-        <button type="button" onClick={() => void copyText(domain, 'domain.txt')}>Копировать домен</button>
-        <button type="button" onClick={() => onFindDomain(domain)}>Другие записи домена</button>
-        <button type="button" onClick={() => onExclude(domain)}>Исключить домен из вида</button>
-        {pageUrl && isSafeToOpen(pageUrl) ? <button type="button" onClick={() => void chrome.tabs.create({ url: pageUrl })}>Открыть страницу-источник</button> : null}
+        {url && isSafeToOpen(url) ? <vui-button size="small" variant="secondary" onClick={() => void chrome.tabs.create({ url })}>Открыть URL</vui-button> : null}
+        {url ? <vui-button size="small" variant="secondary" onClick={() => void copyText(url, 'url.txt')}>Копировать URL</vui-button> : null}
+        <vui-button size="small" variant="secondary" onClick={() => void copyText(domain, 'domain.txt')}>Копировать домен</vui-button>
+        <vui-button size="small" variant="secondary" onClick={() => onFindDomain(domain)}>Другие записи домена</vui-button>
+        <vui-button size="small" variant="secondary" onClick={() => onExclude(domain)}>Исключить домен из вида</vui-button>
+        {pageUrl && isSafeToOpen(pageUrl) ? <vui-button size="small" variant="secondary" onClick={() => void chrome.tabs.create({ url: pageUrl })}>Открыть страницу-источник</vui-button> : null}
       </div>
     </aside>
   );
@@ -611,35 +645,25 @@ function ExportDialog({ onClose, onExport }: { onClose: () => void; onExport: (f
   const [format, setFormat] = useState<'txt' | 'csv' | 'json'>('txt');
   const [scope, setScope] = useState<'filtered' | 'selected' | 'all'>('filtered');
   return (
-    <dialog open className="modal">
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          onExport(format, scope);
-        }}
-      >
-        <h2>Экспорт</h2>
-        <p>Полные URL сохраняются вместе с параметрами запроса. Cookies, заголовки авторизации и тела запросов в экспорт не входят. Подписанные ссылки сами по себе могут давать доступ к ресурсу.</p>
-        <label>Формат
-          <select value={format} onChange={(event) => setFormat(event.target.value as 'txt' | 'csv' | 'json')}>
-            <option value="txt">TXT</option>
-            <option value="csv">CSV</option>
-            <option value="json">JSON</option>
-          </select>
-        </label>
-        <label>Набор
-          <select value={scope} onChange={(event) => setScope(event.target.value as 'filtered' | 'selected' | 'all')}>
-            <option value="filtered">Текущий фильтр</option>
-            <option value="selected">Выбранные</option>
-            <option value="all">Вся сессия в этом разделе</option>
-          </select>
-        </label>
-        <div className="actions">
-          <button type="button" onClick={onClose}>Отмена</button>
-          <button type="submit" className="primary">Сохранить</button>
-        </div>
-      </form>
-    </dialog>
+    <vui-dialog open label="Экспорт" onClose={onClose}>
+      <p className="dialog-copy">Полные URL сохраняются вместе с параметрами запроса. Cookies, заголовки авторизации и тела запросов в экспорт не входят. Подписанные ссылки сами по себе могут давать доступ к ресурсу.</p>
+      <div className="settings-form">
+        <vui-select label="Формат" value={format} onChange={(event) => setFormat(controlValue(event) as 'txt' | 'csv' | 'json')}>
+          <vui-option value="txt">TXT</vui-option>
+          <vui-option value="csv">CSV</vui-option>
+          <vui-option value="json">JSON</vui-option>
+        </vui-select>
+        <vui-select label="Набор" value={scope} onChange={(event) => setScope(controlValue(event) as 'filtered' | 'selected' | 'all')}>
+          <vui-option value="filtered">Текущий фильтр</vui-option>
+          <vui-option value="selected">Выбранные</vui-option>
+          <vui-option value="all">Вся сессия в этом разделе</vui-option>
+        </vui-select>
+      </div>
+      <div slot="footer" className="dialog-actions">
+        <vui-button variant="secondary" onClick={onClose}>Отмена</vui-button>
+        <vui-button variant="primary" onClick={() => onExport(format, scope)}>Сохранить</vui-button>
+      </div>
+    </vui-dialog>
   );
 }
 
@@ -647,42 +671,39 @@ function SettingsDialog({ settings, onClose, onSave }: { settings: Settings; onC
   const [draft, setDraft] = useState(settings);
   const [excluded, setExcluded] = useState(settings.excludedDomains.join('\n'));
   return (
-    <dialog open className="modal wide">
+    <vui-dialog open label="Настройки" size="large" onClose={onClose}>
       <form
+        id="lri-settings"
+        className="settings-form"
         onSubmit={(event) => {
           event.preventDefault();
           onSave({
             ...draft,
+            theme: settings.theme,
             excludedDomains: excluded.split(/\n+/).map((item) => item.trim()).filter(Boolean),
           });
         }}
       >
-        <h2>Настройки</h2>
         <fieldset>
           <legend>Область сбора</legend>
-          <label><input type="radio" name="scope" checked={draft.scope === 'document'} onChange={() => setDraft({ ...draft, scope: 'document' })} /> Только текущий документ, новая навигация открывает сессию</label>
-          <label><input type="radio" name="scope" checked={draft.scope === 'tab'} onChange={() => setDraft({ ...draft, scope: 'tab' })} /> Вся вкладка, включая переходы SPA и полные загрузки</label>
+          <vui-radio name="scope" value="document" checked={draft.scope === 'document'} onChange={() => setDraft({ ...draft, scope: 'document' })}>Только текущий документ, новая навигация открывает сессию</vui-radio>
+          <vui-radio name="scope" value="tab" checked={draft.scope === 'tab'} onChange={() => setDraft({ ...draft, scope: 'tab' })}>Вся вкладка, включая переходы SPA и полные загрузки</vui-radio>
         </fieldset>
-        <label>Домены, скрытые из таблиц
-          <textarea value={excluded} onChange={(event) => setExcluded(event.target.value)} rows={5} />
-        </label>
-        <label>Лимит уникальных URL
-          <input type="number" min={1000} max={200000} value={draft.maxResources} onChange={(event) => setDraft({ ...draft, maxResources: Number(event.target.value) })} />
-        </label>
-        <label>Лимит строк запросов
-          <input type="number" min={100} max={100000} value={draft.maxRequests} onChange={(event) => setDraft({ ...draft, maxRequests: Number(event.target.value) })} />
-        </label>
+        <vui-textarea label="Домены, скрытые из таблиц" value={excluded} rows={5} onInput={(event) => setExcluded(controlValue(event))} />
+        <vui-input label="Лимит уникальных URL" type="number" value={String(draft.maxResources)} onInput={(event) => setDraft({ ...draft, maxResources: Number(controlValue(event)) })} />
+        <vui-input label="Лимит строк запросов" type="number" value={String(draft.maxRequests)} onInput={(event) => setDraft({ ...draft, maxRequests: Number(controlValue(event)) })} />
         <ul className="limits">
           <li>Запросы не блокируются и не изменяются.</li>
           <li>blob: сохраняется как локальный адрес, это не URL сервера.</li>
           <li>webRequest видит рукопожатие WebSocket, но не кадры сообщений.</li>
           <li>chrome://, Chrome Web Store и чужие расширения недоступны.</li>
+          <li>Тема «Как в системе» следует оформлению ОС, пока не выбрана другая.</li>
         </ul>
-        <div className="actions">
-          <button type="button" onClick={onClose}>Закрыть</button>
-          <button type="submit" className="primary">Сохранить</button>
-        </div>
       </form>
-    </dialog>
+      <div slot="footer" className="dialog-actions">
+        <vui-button variant="secondary" onClick={onClose}>Закрыть</vui-button>
+        <vui-button variant="primary" type="submit" form="lri-settings">Сохранить</vui-button>
+      </div>
+    </vui-dialog>
   );
 }

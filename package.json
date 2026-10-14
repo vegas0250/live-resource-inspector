@@ -20,8 +20,10 @@
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.12",
+    "lucide": "^0.545.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "vui": "file:../vui"
   },
   "devDependencies": {
     "@eslint/js": "^9.28.0",

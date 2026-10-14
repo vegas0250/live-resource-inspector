@@ -152,13 +152,18 @@ export interface SessionMeta {
   limited: boolean;
   archived: boolean;
   pruneGeneration: number;
+  /** false, пока полная навигация ещё не зафиксирована событием webNavigation. */
+  settled?: boolean;
 }
+
+export type AppTheme = 'system' | 'light' | 'dark' | 'high-contrast' | 'neon-green' | 'neon-magenta' | 'neon-cyan';
 
 export interface Settings {
   scope: SessionScope;
   excludedDomains: string[];
   maxResources: number;
   maxRequests: number;
+  theme: AppTheme;
 }
 
 export interface Limits {
@@ -177,6 +182,7 @@ export type NetworkObservation =
       tabId: number;
       time: number;
       initiator?: string;
+      documentUrl?: string;
     }
   | {
       phase: 'redirect';
@@ -188,6 +194,7 @@ export type NetworkObservation =
       tabId: number;
       time: number;
       initiator?: string;
+      documentUrl?: string;
     }
   | {
       phase: 'complete';
@@ -200,6 +207,7 @@ export type NetworkObservation =
       time: number;
       fromCache?: boolean;
       initiator?: string;
+      documentUrl?: string;
     }
   | {
       phase: 'error';
@@ -210,6 +218,7 @@ export type NetworkObservation =
       tabId: number;
       time: number;
       initiator?: string;
+      documentUrl?: string;
     };
 
 export interface DomFinding {

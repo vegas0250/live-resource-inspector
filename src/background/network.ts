@@ -1,5 +1,6 @@
 import { HOST_ORIGINS } from '../shared/constants';
 import type { NetworkObservation } from '../shared/types';
+import { isRestrictedUrl } from '../shared/url';
 
 export const WATCH_URLS = [...HOST_ORIGINS];
 
@@ -50,6 +51,7 @@ export function toObservation(phase: NetworkObservation['phase'], details: Reque
       tabId: details.tabId,
       time: details.timeStamp,
       initiator,
+      documentUrl: details.documentUrl,
     };
   }
   if (phase === 'redirect') {
@@ -64,6 +66,7 @@ export function toObservation(phase: NetworkObservation['phase'], details: Reque
       tabId: details.tabId,
       time: details.timeStamp,
       initiator,
+      documentUrl: details.documentUrl,
     };
   }
   if (phase === 'complete') {
@@ -78,6 +81,7 @@ export function toObservation(phase: NetworkObservation['phase'], details: Reque
       time: details.timeStamp,
       fromCache: details.fromCache,
       initiator,
+      documentUrl: details.documentUrl,
     };
   }
   return {
@@ -89,5 +93,13 @@ export function toObservation(phase: NetworkObservation['phase'], details: Reque
     tabId: details.tabId,
     time: details.timeStamp,
     initiator,
+    documentUrl: details.documentUrl,
   };
+}
+
+export function pageUrlForObservation(observation: NetworkObservation): string | undefined {
+  const candidate = observation.type === 'main_frame' ? observation.url : observation.documentUrl || observation.initiator;
+  if (!candidate || isRestrictedUrl(candidate)) return undefined;
+  if (!/^https?:/i.test(candidate)) return undefined;
+  return candidate;
 }

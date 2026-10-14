@@ -17,7 +17,7 @@
     "type": "module"
   },
   "permissions": ["webRequest", "storage", "tabs", "scripting", "webNavigation", "activeTab"],
-  "optional_host_permissions": [
+  "host_permissions": [
     "http://*/*",
     "https://*/*",
     "ws://*/*",

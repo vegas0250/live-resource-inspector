@@ -36,4 +36,18 @@ describe('filters', () => {
     expect(requests).toHaveLength(3);
     expect(requests[0]?.domain).toBe('a.example');
   });
+
+  it('показывает сетевые ошибки по состоянию, а не по слову в поиске', () => {
+    const state = createSessionState('s', 1);
+    state.observeNetwork({ phase: 'start', requestId: 'ok', url: 'https://cdn.example/app.js', method: 'GET', type: 'script', tabId: 1, time: 1 });
+    state.observeNetwork({ phase: 'complete', requestId: 'ok', url: 'https://cdn.example/app.js', type: 'script', tabId: 1, time: 2, statusCode: 200 });
+    state.observeNetwork({ phase: 'start', requestId: 'bad', url: 'https://cdn.example/missing.wasm', method: 'GET', type: 'other', tabId: 1, time: 3 });
+    state.observeNetwork({ phase: 'error', requestId: 'bad', url: 'https://cdn.example/missing.wasm', type: 'other', tabId: 1, time: 4, error: 'net::ERR_ABORTED' });
+    const requests = [...state.requests.values()];
+    const byState = filterRequests(requests, { ...filter, states: ['error'] });
+    expect(byState.map((item) => item.requestId)).toEqual(['bad']);
+    expect(state.stats.errors).toBe(1);
+    const byWord = filterRequests(requests, { ...filter, text: 'ошибка' });
+    expect(byWord.map((item) => item.requestId)).toEqual(['bad']);
+  });
 });

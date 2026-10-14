@@ -42,6 +42,14 @@ chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
   monitor.onHistory(details.tabId, details.url);
 });
 
+chrome.tabs.onActivated.addListener((info) => {
+  void monitor.ensureTab(info.tabId);
+});
+
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status === 'complete') void monitor.ensureTab(tabId);
+});
+
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === 'dashboard') monitor.addPort(port);
 });

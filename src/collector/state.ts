@@ -1,5 +1,6 @@
 import { classify } from '../classifier/classify';
 import { DEFAULT_LIMITS } from '../shared/constants';
+import { STATE_LABELS } from '../shared/labels';
 import { requestRecordId, resourceId } from '../shared/id';
 import { CATEGORY_ORDER } from '../shared/types';
 import type {
@@ -631,6 +632,7 @@ export function resourceSearch(record: ResourceRecord): string {
     record.categories.join(' '),
     record.linkText,
     record.state,
+    STATE_LABELS[record.state],
     record.statusCode,
     record.sources.join(' '),
     record.method,
@@ -659,6 +661,7 @@ export function requestSearch(record: RequestRecord): string {
     record.statusCode,
     record.mimeType,
     record.state,
+    STATE_LABELS[record.state],
     record.initiator,
     record.error,
     record.redirects.join(' '),

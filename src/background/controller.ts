@@ -13,7 +13,8 @@ import {
   listSessions,
   deleteIds,
 } from '../storage/db';
-import { loadSettings, saveSettings } from '../storage/settings';
+import { loadSettings, saveSettings, defaultSettings } from '../storage/settings';
+import { pageUrlForObservation } from './network';
 import type { RequestRecord, ResourceRecord } from '../shared/types';
 
 type Port = chrome.runtime.Port;
@@ -25,6 +26,7 @@ export class Monitor {
   private readonly ports = new Set<Port>();
   private readonly queue: NetworkObservation[] = [];
   private readonly domQueue: Array<{ tabId: number; items: DomFinding[]; hints?: PageHints }> = [];
+  private readonly pausedTabs = new Set<number>();
   private settings: Settings | null = null;
   private booted = false;
   private bootPromise: Promise<void> | null = null;
@@ -50,48 +52,23 @@ export class Monitor {
 
   async start(tabId: number): Promise<TabStateResponse> {
     await this.ready();
-    const tab = await this.readTab(tabId);
-    if (!tab?.url || isRestrictedUrl(tab.url)) {
-      return {
-        ok: false,
-        restricted: true,
-        error: 'Эта страница недоступна для расширений: служебные адреса, Chrome Web Store и другие закрытые контексты не наблюдаются.',
-      };
-    }
-    const settings = await this.ensureSettings();
-    let meta = this.metaForTab(tabId);
-    if (!meta || meta.archived) {
-      meta = this.createMeta(tabId, tab.url, tab.title ?? '', settings);
-      const state = createSessionState(meta.id, tabId, {
-        maxResources: settings.maxResources,
-        maxRequests: settings.maxRequests,
-        warnRatio: DEFAULT_LIMITS.warnRatio,
-      });
-      state.pageUrl = tab.url;
-      this.states.set(meta.id, state);
-      this.metas.set(meta.id, meta);
-    }
-    meta.status = 'running';
-    meta.archived = false;
-    meta.url = tab.url;
-    meta.title = tab.title ?? meta.title;
-    meta.domain = domainFromUrl(tab.url);
-    meta.updatedAt = Date.now();
-    meta.scope = settings.scope;
-    const state = this.states.get(meta.id);
-    if (state) state.pageUrl = tab.url;
-    this.byTab.set(tabId, meta.id);
-    await putSession(meta);
-    await this.persistActive();
-    await this.injectAll(tabId);
-    this.broadcast({ type: 'SESSION', session: meta });
-    return { ok: true, session: meta };
+    this.pausedTabs.delete(tabId);
+    return this.begin(tabId, true);
+  }
+
+  async ensureTab(tabId: number): Promise<void> {
+    await this.ready();
+    if (this.pausedTabs.has(tabId)) return;
+    const meta = this.metaForTab(tabId);
+    if (meta?.status === 'paused' || (meta?.status === 'running' && !meta.archived)) return;
+    await this.begin(tabId, false);
   }
 
   async pause(tabId: number): Promise<TabStateResponse> {
     await this.ready();
     const meta = this.metaForTab(tabId);
     if (!meta) return { ok: false, error: 'Мониторинг этой вкладки не запущен.' };
+    this.pausedTabs.add(tabId);
     meta.status = 'paused';
     meta.updatedAt = Date.now();
     await this.persistMeta(meta);
@@ -104,6 +81,7 @@ export class Monitor {
     await this.ready();
     const meta = this.metaForTab(tabId);
     if (!meta) return this.start(tabId);
+    this.pausedTabs.delete(tabId);
     const tab = await this.readTab(tabId);
     if (!tab?.url || isRestrictedUrl(tab.url)) {
       return { ok: false, restricted: true, error: 'Текущая страница недоступна для мониторинга.' };
@@ -185,9 +163,16 @@ export class Monitor {
 
   async onCommitted(tabId: number, frameId: number, url: string, transitionType: string): Promise<void> {
     await this.ready();
-    if (frameId === 0) {
+    if (frameId === 0 && !isRestrictedUrl(url)) {
       const meta = this.metaForTab(tabId);
-      if (meta && meta.status === 'running' && !isRestrictedUrl(url)) {
+      const paused = this.pausedTabs.has(tabId) || meta?.status === 'paused';
+      if (!paused && (!meta || meta.archived)) {
+        await this.begin(tabId, false);
+      } else if (meta && meta.status === 'running' && meta.settled === false) {
+        this.retarget(meta, url);
+        meta.settled = true;
+        await this.persistMeta(meta);
+      } else if (meta && meta.status === 'running') {
         const reload = transitionType === 'reload';
         if (meta.scope === 'document' && (reload || url !== meta.url)) await this.rotate(tabId, url, meta);
         else if (url !== meta.url) this.retarget(meta, url);
@@ -232,6 +217,7 @@ export class Monitor {
           void this.injectAll(meta.tabId);
         }
       }
+      await this.armOpenTabs();
     } catch (error) {
       console.error('Не удалось восстановить сессии', error);
     } finally {
@@ -299,6 +285,7 @@ export class Monitor {
   }
 
   private applyNetwork(observation: NetworkObservation): void {
+    this.prepareSession(observation);
     const sessionId = this.byTab.get(observation.tabId);
     if (!sessionId) return;
     const meta = this.metas.get(sessionId);
@@ -309,14 +296,89 @@ export class Monitor {
     this.scheduleFlush(sessionId);
   }
 
-  private async rotate(tabId: number, url: string, previous: SessionMeta): Promise<void> {
-    previous.status = 'paused';
-    previous.archived = true;
-    previous.updatedAt = Date.now();
-    await putSession(previous);
-    const settings = await this.ensureSettings();
+  private async begin(tabId: number, resume: boolean): Promise<TabStateResponse> {
     const tab = await this.readTab(tabId);
-    const meta = this.createMeta(tabId, url, tab?.title ?? previous.title, settings);
+    if (!tab?.url || isRestrictedUrl(tab.url)) {
+      return {
+        ok: false,
+        restricted: true,
+        error: 'Эта страница недоступна для расширений: служебные адреса, Chrome Web Store и другие закрытые контексты не наблюдаются.',
+      };
+    }
+    const settings = await this.ensureSettings();
+    let meta = this.metaForTab(tabId);
+    if (meta?.status === 'paused' && !resume) return { ok: true, session: meta };
+    if (!meta || meta.archived) {
+      meta = this.openSession(tabId, tab.url, true, tab.title ?? '');
+    }
+    meta.status = 'running';
+    meta.archived = false;
+    meta.settled = true;
+    meta.url = tab.url;
+    meta.title = tab.title ?? meta.title;
+    meta.domain = domainFromUrl(tab.url);
+    meta.updatedAt = Date.now();
+    meta.scope = settings.scope;
+    const state = this.states.get(meta.id);
+    if (state) {
+      state.pageUrl = tab.url;
+      state.limits.maxResources = settings.maxResources;
+      state.limits.maxRequests = settings.maxRequests;
+    }
+    this.byTab.set(tabId, meta.id);
+    this.pausedTabs.delete(tabId);
+    await putSession(meta);
+    await this.persistActive();
+    await this.injectAll(tabId);
+    this.broadcast({ type: 'SESSION', session: meta });
+    return { ok: true, session: meta };
+  }
+
+  private async armOpenTabs(): Promise<void> {
+    let tabs: chrome.tabs.Tab[] = [];
+    try {
+      tabs = await chrome.tabs.query({});
+    } catch {
+      return;
+    }
+    for (const tab of tabs) {
+      if (!tab.id || !tab.url || isRestrictedUrl(tab.url)) continue;
+      const meta = this.metaForTab(tab.id);
+      if (meta?.status === 'paused') {
+        this.pausedTabs.add(tab.id);
+        continue;
+      }
+      if (meta?.status === 'running' && !meta.archived) continue;
+      await this.begin(tab.id, false);
+    }
+  }
+
+  private prepareSession(observation: NetworkObservation): void {
+    const current = this.metaForTab(observation.tabId);
+    if (current?.status === 'paused' || this.pausedTabs.has(observation.tabId)) return;
+    const pageUrl = pageUrlForObservation(observation);
+    if (current?.status === 'running' && !current.archived) {
+      if (
+        observation.phase === 'start' &&
+        observation.type === 'main_frame' &&
+        pageUrl &&
+        pageUrl !== current.url &&
+        current.settled !== false &&
+        current.scope === 'document'
+      ) {
+        this.replaceSession(observation.tabId, pageUrl, current, false);
+      } else if (pageUrl && pageUrl !== current.url && current.scope === 'tab') {
+        this.retarget(current, pageUrl);
+      }
+      return;
+    }
+    if (!pageUrl) return;
+    this.openSession(observation.tabId, pageUrl, false);
+  }
+
+  private openSession(tabId: number, url: string, settled: boolean, title = ''): SessionMeta {
+    const settings = this.liveSettings();
+    const meta = this.createMeta(tabId, url, title, settings, settled);
     const state = createSessionState(meta.id, tabId, {
       maxResources: settings.maxResources,
       maxRequests: settings.maxRequests,
@@ -326,9 +388,30 @@ export class Monitor {
     this.states.set(meta.id, state);
     this.metas.set(meta.id, meta);
     this.byTab.set(tabId, meta.id);
+    void this.persistMeta(meta);
+    void this.injectAll(tabId);
+    this.broadcast({ type: 'SESSION', session: meta });
+    return meta;
+  }
+
+  private replaceSession(tabId: number, url: string, previous: SessionMeta, settled: boolean): SessionMeta {
+    previous.status = 'paused';
+    previous.archived = true;
+    previous.updatedAt = Date.now();
+    void putSession(previous);
+    return this.openSession(tabId, url, settled, previous.title);
+  }
+
+  private liveSettings(): Settings {
+    return this.settings ?? defaultSettings;
+  }
+
+  private async rotate(tabId: number, url: string, previous: SessionMeta): Promise<void> {
+    const tab = await this.readTab(tabId);
+    const meta = this.replaceSession(tabId, url, previous, true);
+    if (tab?.title) meta.title = tab.title;
     await putSession(meta);
     await this.persistActive();
-    this.broadcast({ type: 'SESSION', session: meta });
   }
 
   private retarget(meta: SessionMeta, url: string): void {
@@ -340,7 +423,7 @@ export class Monitor {
     this.broadcast({ type: 'SESSION', session: meta });
   }
 
-  private createMeta(tabId: number, url: string, title: string, settings: Settings): SessionMeta {
+  private createMeta(tabId: number, url: string, title: string, settings: Settings, settled = true): SessionMeta {
     const now = Date.now();
     return {
       id: createId('ses'),
@@ -358,6 +441,7 @@ export class Monitor {
       limited: false,
       archived: false,
       pruneGeneration: 0,
+      settled,
     };
   }
 
